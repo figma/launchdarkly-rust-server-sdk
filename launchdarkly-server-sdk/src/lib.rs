@@ -8,6 +8,7 @@
 
 #![deny(rustdoc::missing_crate_level_docs)]
 #![deny(missing_docs)]
+#![allow(clippy::all)]
 
 #[macro_use]
 extern crate log;
@@ -67,13 +68,7 @@ static LAUNCHDARKLY_TAGS_HEADER: &str = "x-launchdarkly-tags";
 static CURRENT_EVENT_SCHEMA: &str = "3";
 
 lazy_static! {
-    pub(crate) static ref USER_AGENT: String =
-        "RustServerClient/".to_owned() + built_info::PKG_VERSION;
-}
-
-#[allow(dead_code)]
-mod built_info {
-    include!(concat!(env!("OUT_DIR"), "/built.rs"));
+    pub(crate) static ref USER_AGENT: String = "RustServerClient/".to_owned() + version_string();
 }
 
 #[cfg(test)]
