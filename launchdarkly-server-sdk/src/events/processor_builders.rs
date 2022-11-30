@@ -321,7 +321,8 @@ mod tests {
 
     #[test_case(Some("application-id/abc:application-sha/xyz".into()), "application-id/abc:application-sha/xyz")]
     #[test_case(None, Matcher::Missing)]
-    fn processor_sends_correct_headers(tag: Option<String>, matcher: impl Into<Matcher>) {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn processor_sends_correct_headers(tag: Option<String>, matcher: impl Into<Matcher>) {
         let mock_endpoint = mock("POST", "/bulk")
             .with_status(200)
             .expect_at_least(1)

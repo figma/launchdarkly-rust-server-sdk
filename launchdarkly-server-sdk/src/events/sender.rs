@@ -3,6 +3,8 @@ use crate::{
     LAUNCHDARKLY_PAYLOAD_ID_HEADER,
 };
 use crossbeam_channel::Sender;
+use tokio::runtime::Handle;
+use tokio::task::block_in_place;
 
 use chrono::DateTime;
 use r::{header::HeaderValue, Response};
@@ -88,7 +90,11 @@ impl EventSender for ReqwestEventSender {
                 .header(LAUNCHDARKLY_PAYLOAD_ID_HEADER, uuid.to_string())
                 .body(json.clone());
 
-            let response = match request.send() {
+            let resp = block_in_place(|| {
+                let handle = Handle::current();
+                handle.block_on(request.send())
+            });
+            let response = match resp {
                 Ok(response) => response,
                 Err(e) => {
                     error!("Failed to send events. Some events were dropped: {:?}", e);
@@ -183,8 +189,8 @@ mod tests {
         assert_eq!(is_recoverable, is_http_error_recoverable(status));
     }
 
-    #[test]
-    fn can_parse_server_time_from_response() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn can_parse_server_time_from_response() {
         let _mock = mock("POST", "/bulk")
             .with_status(200)
             .with_header("date", "Fri, 13 Feb 2009 23:31:30 GMT")
@@ -201,8 +207,8 @@ mod tests {
         assert_eq!(sender_result.time_from_server, 1234567890000);
     }
 
-    #[test]
-    fn unrecoverable_failure_requires_shutdown() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn unrecoverable_failure_requires_shutdown() {
         let _mock = mock("POST", "/bulk").with_status(401).create();
 
         let (tx, rx) = bounded::<EventSenderResult>(5);
@@ -215,8 +221,8 @@ mod tests {
         assert!(sender_result.must_shutdown);
     }
 
-    #[test]
-    fn recoverable_failures_are_attempted_multiple_times() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn recoverable_failures_are_attempted_multiple_times() {
         let mock = mock("POST", "/bulk").with_status(400).expect(2).create();
 
         let (tx, rx) = bounded::<EventSenderResult>(5);
@@ -230,8 +236,8 @@ mod tests {
         mock.assert();
     }
 
-    #[test]
-    fn retrying_requests_can_eventually_succeed() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn retrying_requests_can_eventually_succeed() {
         let _failed = mock("POST", "/bulk").with_status(400).create();
         let _succeed = mock("POST", "/bulk")
             .with_status(200)

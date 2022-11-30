@@ -17,17 +17,17 @@ chrono = "0.4.19"
 crossbeam-channel = "0.5.1"
 data-encoding = "2.3.2"
 eventsource-client = "0.11.0"
-futures = "0.3.12"
+futures = "0.3.24"
 lazy_static = "1.4.0"
 log = "0.4.14"
 lru = { version = "0.7.2", default_features = false }
-reqwest = { version = "0.9.11", default_features = false, features = ["rustls-tls"] }
+reqwest = { version = "0.11.6", default_features = false, features = ["rustls-tls", "blocking", "json"] }
 ring = "0.16.20"
 launchdarkly-server-sdk-evaluation = "= 1.0.0-beta.5"
 serde = { version = "1.0.132", features = ["derive"] }
 serde_json = { version = "1.0.73", features = ["float_roundtrip"] }
 thiserror = "1.0"
-tokio = { version = "1.2.0", features = ["rt-multi-thread"] }
+tokio = { version = "1.21.2", features = ["rt-multi-thread"] }
 threadpool = "1.8.1"
 parking_lot = "0.12.0"
 tokio-stream = { version = "0.1.8", features = ["sync"] }
@@ -38,7 +38,7 @@ uuid = {version = "1.0.0-alpha.1", features = ["v4"] }
 maplit = "1.0.1"
 env_logger = "0.9.0"
 serde_json = { version = "1.0.73", features = ["preserve_order"] } # for deterministic JSON testing
-tokio = { version = "1.2.0", features = ["macros", "time"] }
+tokio = { version = "1.21.2", features = ["macros", "time"] }
 test-case = "2.0.0"
 mockito = "0.31.0"
 

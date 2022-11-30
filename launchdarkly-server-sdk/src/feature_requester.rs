@@ -7,6 +7,8 @@ use r::{
     StatusCode,
 };
 use reqwest as r;
+use tokio::runtime::Handle;
+use tokio::task::block_in_place;
 
 #[derive(Debug, PartialEq)]
 pub enum FeatureRequesterError {
@@ -52,9 +54,12 @@ impl FeatureRequester for ReqwestFeatureRequester {
             request_builder = request_builder.header("If-None-Match", cache.1.clone());
         }
 
-        let resp = request_builder.send();
+        let resp = block_in_place(|| {
+            let handle = Handle::current();
+            handle.block_on(request_builder.send())
+        });
 
-        let mut response = match resp {
+        let response = match resp {
             Ok(response) => response,
             Err(e) => {
                 error!(
@@ -89,7 +94,11 @@ impl FeatureRequester for ReqwestFeatureRequester {
             .map_or_else(|_| "".into(), |s| s.into());
 
         if response.status().is_success() {
-            return match response.json::<AllData<Flag, Segment>>() {
+            let resp_json = block_in_place(|| {
+                let handle = Handle::current();
+                handle.block_on(response.json::<AllData<Flag, Segment>>())
+            });
+            return match resp_json {
                 Ok(all_data) => {
                     if !etag.is_empty() {
                         debug!("Caching data for future use with etag: {}", etag);
@@ -123,8 +132,8 @@ mod tests {
     use mockito::mock;
     use test_case::test_case;
 
-    #[test]
-    fn updates_etag_as_appropriate() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn updates_etag_as_appropriate() {
         let _initial_request = mock("GET", "/")
             .with_status(200)
             .with_header("etag", "INITIAL-TAG")
@@ -171,7 +180,11 @@ mod tests {
     #[test_case(429, FeatureRequesterError::Temporary)]
     #[test_case(430, FeatureRequesterError::Permanent)]
     #[test_case(500, FeatureRequesterError::Temporary)]
-    fn correctly_determines_unrecoverable_errors(status: usize, error: FeatureRequesterError) {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn correctly_determines_unrecoverable_errors(
+        status: usize,
+        error: FeatureRequesterError,
+    ) {
         let _initial_request = mock("GET", "/").with_status(status).create();
 
         let mut requester = build_feature_requester();
