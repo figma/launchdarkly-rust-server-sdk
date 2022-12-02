@@ -5,10 +5,11 @@ use super::sender::{EventSender, ReqwestEventSender};
 use super::EventsConfiguration;
 
 use crate::{service_endpoints, LAUNCHDARKLY_TAGS_HEADER};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
+use url;
 
 const DEFAULT_FLUSH_POLL_INTERVAL: Duration = Duration::from_secs(5);
 const DEFAULT_EVENT_CAPACITY: usize = 500;
@@ -78,29 +79,21 @@ impl EventProcessorFactory for EventProcessorBuilder {
         tags: Option<String>,
     ) -> Result<Arc<dyn EventProcessor>, BuildError> {
         let url = format!("{}/bulk", endpoints.events_base_url());
-        let url = reqwest::Url::parse(&url).map_err(|e| {
+        let url = url::Url::parse(&url).map_err(|e| {
             BuildError::InvalidConfig(format!("couldn't parse events_base_url: {}", e))
         })?;
 
-        let mut builder = reqwest::Client::builder();
-
-        if let Some(tags) = tags {
-            let mut headers = reqwest::header::HeaderMap::new();
-            headers.append(
-                LAUNCHDARKLY_TAGS_HEADER,
-                reqwest::header::HeaderValue::from_str(&tags)
-                    .map_err(|e| BuildError::InvalidConfig(e.to_string()))?,
-            );
-            builder = builder.default_headers(headers);
-        }
-
-        let http = builder.build().map_err(|e| {
-            BuildError::InvalidConfig(format!("unable to build reqwest client: {}", e))
-        })?;
+        let headers = if let Some(tags) = tags {
+            let mut headers = HashMap::new();
+            headers.insert(LAUNCHDARKLY_TAGS_HEADER.to_string(), tags);
+            headers
+        } else {
+            HashMap::new()
+        };
 
         let event_sender = match &self.event_sender {
             Some(event_sender) => event_sender.clone(),
-            _ => Arc::new(ReqwestEventSender::new(http, url, sdk_key)),
+            _ => Arc::new(ReqwestEventSender::new(headers, url, sdk_key)),
         };
 
         let events_configuration = EventsConfiguration {

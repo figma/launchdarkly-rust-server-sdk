@@ -60,6 +60,7 @@ mod reqwest;
 mod service_endpoints;
 mod stores;
 mod test_common;
+mod ureq;
 mod version;
 
 static LAUNCHDARKLY_EVENT_SCHEMA_HEADER: &str = "x-launchdarkly-event-schema";

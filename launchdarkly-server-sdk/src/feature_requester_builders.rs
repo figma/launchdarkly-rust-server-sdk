@@ -1,8 +1,9 @@
 use crate::feature_requester::FeatureRequester;
 use crate::feature_requester::ReqwestFeatureRequester;
 use crate::LAUNCHDARKLY_TAGS_HEADER;
-use reqwest as r;
+use std::collections::HashMap;
 use thiserror::Error;
+use url;
 
 /// Error type used to represent failures when building a [FeatureRequesterFactory] instance.
 #[non_exhaustive]
@@ -39,27 +40,19 @@ impl ReqwestFeatureRequesterBuilder {
 impl FeatureRequesterFactory for ReqwestFeatureRequesterBuilder {
     fn build(&self, tags: Option<String>) -> Result<Box<dyn FeatureRequester>, BuildError> {
         let url = format!("{}/sdk/latest-all", self.url);
-        let url = r::Url::parse(&url)
+        let url = url::Url::parse(&url)
             .map_err(|_| BuildError::InvalidConfig("Invalid base url provided".into()))?;
 
-        let mut builder = r::Client::builder();
-
-        if let Some(tags) = tags {
-            let mut headers = r::header::HeaderMap::new();
-            headers.append(
-                LAUNCHDARKLY_TAGS_HEADER,
-                r::header::HeaderValue::from_str(&tags)
-                    .map_err(|e| BuildError::InvalidConfig(e.to_string()))?,
-            );
-            builder = builder.default_headers(headers);
-        }
-
-        let http = builder
-            .build()
-            .map_err(|e| BuildError::InvalidConfig(e.to_string()))?;
+        let headers = if let Some(tags) = tags {
+            let mut headers = HashMap::new();
+            headers.insert(LAUNCHDARKLY_TAGS_HEADER.to_string(), tags);
+            headers
+        } else {
+            HashMap::new()
+        };
 
         Ok(Box::new(ReqwestFeatureRequester::new(
-            http,
+            headers,
             url,
             self.sdk_key.clone(),
         )))

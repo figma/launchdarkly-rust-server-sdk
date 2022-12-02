@@ -1,14 +1,13 @@
-use crate::{
-    reqwest::is_http_error_recoverable, LAUNCHDARKLY_EVENT_SCHEMA_HEADER,
-    LAUNCHDARKLY_PAYLOAD_ID_HEADER,
-};
+use crate::{LAUNCHDARKLY_EVENT_SCHEMA_HEADER, LAUNCHDARKLY_PAYLOAD_ID_HEADER};
 use crossbeam_channel::Sender;
-use tokio::runtime::Handle;
-use tokio::task::block_in_place;
+use std::collections::HashMap;
 
+use crate::ureq::{is_http_error_recoverable, is_http_success};
 use chrono::DateTime;
-use r::{header::HeaderValue, Response};
-use reqwest as r;
+#[cfg(test)]
+use http_types::StatusCode;
+use ureq;
+use url::Url;
 use uuid::Uuid;
 
 use super::event::OutputEvent;
@@ -25,28 +24,22 @@ pub trait EventSender: Send + Sync {
 
 #[derive(Clone)]
 pub struct ReqwestEventSender {
-    url: r::Url,
+    url: Url,
     sdk_key: String,
-    http: r::Client,
+    default_headers: HashMap<String, String>,
 }
 
 impl ReqwestEventSender {
-    pub fn new(http: r::Client, url: r::Url, sdk_key: &str) -> Self {
+    pub fn new(default_headers: HashMap<String, String>, url: Url, sdk_key: &str) -> Self {
         Self {
-            http,
+            default_headers,
             url,
             sdk_key: sdk_key.to_owned(),
         }
     }
 
-    fn get_server_time_from_response(&self, response: &Response) -> u128 {
-        let date_value = response
-            .headers()
-            .get(r::header::DATE)
-            .map_or(HeaderValue::from_static(""), |v| v.to_owned())
-            .to_str()
-            .unwrap_or("")
-            .to_owned();
+    fn get_server_time_from_response(&self, response: &ureq::Response) -> u128 {
+        let date_value = response.header("date").unwrap_or("");
 
         match DateTime::parse_from_rfc2822(&date_value) {
             Ok(date) => date.timestamp_millis() as u128,
@@ -77,42 +70,31 @@ impl EventSender for ReqwestEventSender {
         };
 
         for _ in 0..2 {
-            let request = self
-                .http
-                .post(self.url.clone())
-                .header("Content-Type", "application/json")
-                .header("Authorization", self.sdk_key.clone())
-                .header("User-Agent", &*crate::USER_AGENT)
-                .header(
+            let mut request = ureq::request_url("POST", &self.url)
+                .set("Content-Type", "application/json")
+                .set("Authorization", &self.sdk_key.clone())
+                .set("User-Agent", &*crate::USER_AGENT)
+                .set(
                     LAUNCHDARKLY_EVENT_SCHEMA_HEADER,
                     crate::CURRENT_EVENT_SCHEMA,
                 )
-                .header(LAUNCHDARKLY_PAYLOAD_ID_HEADER, uuid.to_string())
-                .body(json.clone());
+                .set(LAUNCHDARKLY_PAYLOAD_ID_HEADER, &uuid.to_string());
 
-            let resp = block_in_place(|| {
-                let handle = Handle::current();
-                handle.block_on(request.send())
-            });
-            let response = match resp {
+            for (k, v) in self.default_headers.clone() {
+                request = request.set(&k, &v);
+            }
+
+            let response = match request.send_json(json.clone()) {
                 Ok(response) => response,
-                Err(e) => {
-                    error!("Failed to send events. Some events were dropped: {:?}", e);
-                    let must_shutdown =
-                        !matches!(e.status(), Some(status) if is_http_error_recoverable(status));
-
-                    let _ = result_tx.send(EventSenderResult {
-                        success: false,
-                        time_from_server: 0,
-                        must_shutdown,
-                    });
+                Err(ureq::Error::Status(_code, response)) => response,
+                Err(ureq::Error::Transport(_transport)) => {
                     return;
                 }
             };
 
             debug!("sent event: {:?}", response);
 
-            if response.status().is_success() {
+            if is_http_success(response.status()) {
                 let _ = result_tx.send(EventSenderResult {
                     success: true,
                     time_from_server: self.get_server_time_from_response(&response),
@@ -172,21 +154,23 @@ mod tests {
     use super::*;
     use crossbeam_channel::bounded;
     use mockito::mock;
-    use reqwest::StatusCode;
     use test_case::test_case;
 
-    #[test_case(StatusCode::CONTINUE, true)]
-    #[test_case(StatusCode::OK, true)]
-    #[test_case(StatusCode::MULTIPLE_CHOICES, true)]
-    #[test_case(StatusCode::BAD_REQUEST, true)]
-    #[test_case(StatusCode::UNAUTHORIZED, false)]
-    #[test_case(StatusCode::REQUEST_TIMEOUT, true)]
-    #[test_case(StatusCode::CONFLICT, false)]
-    #[test_case(StatusCode::TOO_MANY_REQUESTS, true)]
-    #[test_case(StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE, false)]
-    #[test_case(StatusCode::INTERNAL_SERVER_ERROR, true)]
+    #[test_case(StatusCode::Continue, true)]
+    #[test_case(StatusCode::Ok, true)]
+    #[test_case(StatusCode::MultipleChoice, true)]
+    #[test_case(StatusCode::BadRequest, true)]
+    #[test_case(StatusCode::Unauthorized, false)]
+    #[test_case(StatusCode::RequestTimeout, true)]
+    #[test_case(StatusCode::Conflict, false)]
+    #[test_case(StatusCode::TooManyRequests, true)]
+    #[test_case(StatusCode::RequestHeaderFieldsTooLarge, false)]
+    #[test_case(StatusCode::InternalServerError, true)]
     fn can_determine_recoverable_errors(status: StatusCode, is_recoverable: bool) {
-        assert_eq!(is_recoverable, is_http_error_recoverable(status));
+        assert_eq!(
+            is_recoverable,
+            is_http_error_recoverable(status.to_string().parse::<u16>().unwrap())
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -256,11 +240,9 @@ mod tests {
     }
 
     fn build_event_sender() -> ReqwestEventSender {
-        let http = r::Client::builder()
-            .build()
-            .expect("Failed building the client");
+        let http = HashMap::new();
         let url = format!("{}/bulk", &mockito::server_url());
-        let url = reqwest::Url::parse(&url).expect("Failed parsing the mock server url");
+        let url = url::Url::parse(&url).expect("Failed parsing the mock server url");
 
         ReqwestEventSender::new(http, url, "sdk-key")
     }

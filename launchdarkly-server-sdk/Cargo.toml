@@ -21,7 +21,7 @@ futures = "0.3.24"
 lazy_static = "1.4.0"
 log = "0.4.14"
 lru = { version = "0.7.2", default_features = false }
-reqwest = { version = "0.11.6", default_features = false, features = ["rustls-tls", "blocking", "json"] }
+ureq = { version = "*", features = ["json", "charset", "rustls"] }
 ring = "0.16.20"
 launchdarkly-server-sdk-evaluation = "= 1.0.0-beta.5"
 serde = { version = "1.0.132", features = ["derive"] }
@@ -33,6 +33,7 @@ parking_lot = "0.12.0"
 tokio-stream = { version = "0.1.8", features = ["sync"] }
 moka = "0.7.1"
 uuid = {version = "1.0.0-alpha.1", features = ["v4"] }
+url = "2.3.1"
 
 [dev-dependencies]
 maplit = "1.0.1"
@@ -41,6 +42,7 @@ serde_json = { version = "1.0.73", features = ["preserve_order"] } # for determi
 tokio = { version = "1.21.2", features = ["macros", "time"] }
 test-case = "2.0.0"
 mockito = "0.31.0"
+http-types = "2.12"
 
 [[example]]
 name = "print_flags"
